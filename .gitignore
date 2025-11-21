@@ -1,0 +1,11 @@
+# .env contiene secretos
+.env
+
+# Carpetas de sistema/temporales
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+
+# Datos de la base de datos (son pesados y locales)
+postgres_data/
