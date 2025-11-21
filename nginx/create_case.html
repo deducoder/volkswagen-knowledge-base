@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuevo Caso VW</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4">
+    <div class="max-w-lg mx-auto bg-white p-6 rounded-lg shadow-md">
+        <h1 class="text-2xl font-bold text-blue-900 mb-4">Registrar Caso de Diagnóstico</h1>
+        
+        <div class="bg-yellow-50 p-3 mb-4 rounded border border-yellow-200 text-sm">
+            <h3 class="font-bold text-yellow-800 mb-2">🔐 Credenciales API (.env)</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <input type="text" id="api_user" placeholder="API_USERNAME" class="border p-1 rounded w-full" value="admin">
+                <input type="password" id="api_pass" placeholder="API_PASSWORD" class="border p-1 rounded w-full" value="secretpassword">
+            </div>
+        </div>
+
+        <form id="caseForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Título (Resumen)</label>
+                <input type="text" id="title" required class="mt-1 block w-full border border-gray-300 rounded-md p-2">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Modelo</label>
+                    <input type="text" id="vehicle_model" required class="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Año</label>
+                    <input type="number" id="year" required min="1950" max="2026" class="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Grupo</label>
+                <select id="construction_group" class="mt-1 block w-full border border-gray-300 rounded-md p-2 bg-white">
+                    <option value="Motor">Motor</option>
+                    <option value="Transmisión">Transmisión</option>
+                    <option value="Eléctrico">Eléctrico</option>
+                    <option value="Suspensión">Suspensión</option>
+                    <option value="Carrocería">Carrocería</option>
+                    <option value="Frenos">Frenos</option>
+                    <option value="Climatización">Climatización</option>
+                    <option value="Infoentretenimiento">Infoentretenimiento</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Problema</label>
+                <textarea id="problem_description" rows="2" required class="mt-1 block w-full border border-gray-300 rounded-md p-2"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Solución</label>
+                <textarea id="solution_description" rows="2" required class="mt-1 block w-full border border-gray-300 rounded-md p-2"></textarea>
+            </div>
+
+            <button type="submit" class="w-full bg-blue-900 text-white py-2 px-4 rounded hover:bg-blue-800 transition">
+                Guardar Caso
+            </button>
+        </form>
+        
+        <div id="statusMessage" class="mt-4 text-center text-sm hidden"></div>
+    </div>
+
+    <script>
+        document.getElementById('caseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.textContent = "Enviando...";
+            statusDiv.className = "mt-4 text-center text-sm text-gray-600";
+            statusDiv.classList.remove('hidden');
+
+            // 1. LEER CREDENCIALES DEL FORMULARIO
+            const user = document.getElementById('api_user').value;
+            const pass = document.getElementById('api_pass').value;
+            const credentials = btoa(user + ":" + pass);
+
+            const data = {
+                title: document.getElementById('title').value,
+                vehicle_model: document.getElementById('vehicle_model').value,
+                year: parseInt(document.getElementById('year').value),
+                construction_group: document.getElementById('construction_group').value,
+                problem_description: document.getElementById('problem_description').value,
+                solution_description: document.getElementById('solution_description').value
+            };
+
+            try {
+                const response = await fetch('/api/cases/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Basic ' + credentials
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    statusDiv.textContent = "✅ Guardado! ID: " + result.id;
+                    statusDiv.className = "mt-4 text-center text-sm text-green-600 font-bold";
+                    // Limpiar formulario pero dejar credenciales
+                    document.getElementById('caseForm').reset();
+                } else {
+                    // Si falla, mostramos el error sin que el navegador secuestre el login
+                    const error = await response.json(); // Ojo: si es 401 el navegador podría saltar igual antes de llegar aquí
+                    statusDiv.textContent = "❌ Error: " + response.status + " (Verifica usuario/password)";
+                    statusDiv.className = "mt-4 text-center text-sm text-red-600 font-bold";
+                }
+            } catch (err) {
+                console.error(err);
+                statusDiv.textContent = "❌ Error de conexión (Revisa consola)";
+                statusDiv.className = "mt-4 text-center text-sm text-red-600 font-bold";
+            }
+        });
+    </script>
+</body>
+</html>

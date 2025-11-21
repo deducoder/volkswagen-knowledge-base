@@ -43,10 +43,10 @@ services:
     image: nginx:alpine
     container_name: vw_nginx
     ports:
-      - "80:80" # Exponemos solo el puerto estándar HTTP
+      - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx:/usr/share/nginx/html:ro
     depends_on:
       - backend
     networks:
