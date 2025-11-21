@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import List
 from sqlmodel.ext.asyncio.session import AsyncSession
 from fastapi import HTTPException, status
-from sqlalchemy import text, select, or_
+from sqlalchemy import select, or_
 from app.models import DiagnosisCase, DiagnosisCaseCreate, SearchRequest, SearchResult
 from app.core.ai_client import AIClient
 
@@ -11,6 +12,10 @@ class CaseService:
         self.ai_client = AIClient()
 
     async def create_case(self, case_create: DiagnosisCaseCreate) -> DiagnosisCase:
+        """
+        Crea un nuevo caso de diagnóstico, validando reglas de negocio
+        y generando automáticamente el embedding vectorial.
+        """
         # 1. Validación de Negocio
         current_year = datetime.now().year
         if case_create.year < 1950 or case_create.year > current_year + 1:
@@ -45,58 +50,92 @@ class CaseService:
         
         return db_case
 
-    async def search_cases(self, search_params: SearchRequest) -> list[SearchResult]:
+    async def search_cases(self, search_params: SearchRequest) -> List[SearchResult]:
         """
-        Motor de Búsqueda Híbrido: Vectorial (Semántico) + Fallback SQL (Texto).
+        Motor de Búsqueda Híbrido V2 (Corregido):
+        Retorna el SCORE REAL de similitud (0 a 1) e ignora registros con embedding NULL.
         """
         results = []
         search_vector = await self.ai_client.get_embedding(search_params.query)
 
-        # Consulta base
-        statement = select(DiagnosisCase)
-
-        # Filtros SQL (siempre se aplican)
-        if search_params.model_filter:
-            statement = statement.where(
-                DiagnosisCase.vehicle_model.ilike(f"%{search_params.model_filter}%")
-            )
-        
-        if search_params.group_filter:
-            statement = statement.where(
-                DiagnosisCase.construction_group == search_params.group_filter
-            )
-
-        # Estrategia Híbrida
+        # ESTRATEGIA 1: BÚSQUEDA VECTORIAL (SI HAY VECTOR)
         if search_vector:
             print(f"🔍 Búsqueda Semántica (Vector) para: '{search_params.query}'")
-            # Ordenar por distancia coseno
-            statement = statement.order_by(
-                DiagnosisCase.embedding.cosine_distance(search_vector)
-            ).limit(5)
+            
+            # Calcular distancia coseno en la DB
+            distance_col = DiagnosisCase.embedding.cosine_distance(search_vector)
+            
+            statement = select(DiagnosisCase, distance_col)
+
+            # --- CORRECCIÓN CRÍTICA ---
+            # Solo comparamos contra casos que TIENEN vector.
+            # Esto evita que 'dist' sea None y rompa la matemática.
+            statement = statement.where(DiagnosisCase.embedding.is_not(None))
+            # --------------------------
+
+            # --- FILTROS ---
+            if search_params.model_filter:
+                statement = statement.where(DiagnosisCase.vehicle_model.ilike(f"%{search_params.model_filter}%"))
+            if search_params.group_filter:
+                statement = statement.where(DiagnosisCase.construction_group == search_params.group_filter)
+
+            # Ordenar: Menor distancia = Mayor similitud
+            statement = statement.order_by(distance_col).limit(5)
+
+            # Ejecutar
+            exec_result = await self.session.execute(statement)
+            rows = exec_result.all()
+
+            for case, dist in rows:
+                # Si por alguna razón remota sigue llegando None, usamos 1.0 (distancia máxima/sin similitud)
+                safe_dist = dist if dist is not None else 1.0
+                
+                # La distancia coseno va de 0 (idéntico) a 2 (opuesto).
+                similarity = max(0, 1 - safe_dist)
+                
+                results.append(SearchResult(
+                    id=case.id,
+                    title=case.title,
+                    vehicle_model=case.vehicle_model,
+                    year=case.year,
+                    construction_group=case.construction_group,
+                    problem_description=case.problem_description,
+                    solution_description=case.solution_description,
+                    score=similarity 
+                ))
+
+        # ESTRATEGIA 2: FALLBACK TEXTO (SI FALLA IA O NO HAY VECTOR)
         else:
-            print(f"⚠️ Fallback: Búsqueda de Texto (LIKE) para: '{search_params.query}'")
+            print(f"⚠️ Fallback: Búsqueda de Texto (LIKE)")
+            statement = select(DiagnosisCase)
+            
+            # Filtros
+            if search_params.model_filter:
+                statement = statement.where(DiagnosisCase.vehicle_model.ilike(f"%{search_params.model_filter}%"))
+            if search_params.group_filter:
+                statement = statement.where(DiagnosisCase.construction_group == search_params.group_filter)
+            
+            # Búsqueda de texto simple (ILIKE)
             statement = statement.where(
                 or_(
                     DiagnosisCase.problem_description.ilike(f"%{search_params.query}%"),
                     DiagnosisCase.solution_description.ilike(f"%{search_params.query}%")
                 )
             ).limit(10)
-
-        # Ejecución
-        exec_result = await self.session.execute(statement)
-        cases = exec_result.scalars().all()
-
-        # Mapeo a respuesta
-        for case in cases:
-            results.append(SearchResult(
-                id=case.id,
-                title=case.title,
-                vehicle_model=case.vehicle_model,
-                year=case.year,
-                construction_group=case.construction_group,
-                problem_description=case.problem_description,
-                solution_description=case.solution_description,
-                score=0.9 if search_vector else 0.5
-            ))
             
+            exec_result = await self.session.execute(statement)
+            cases = exec_result.scalars().all()
+            
+            for case in cases:
+                results.append(SearchResult(
+                    id=case.id,
+                    title=case.title,
+                    vehicle_model=case.vehicle_model,
+                    year=case.year,
+                    construction_group=case.construction_group,
+                    problem_description=case.problem_description,
+                    solution_description=case.solution_description,
+                    score=0.5 
+                ))
+
         return results
