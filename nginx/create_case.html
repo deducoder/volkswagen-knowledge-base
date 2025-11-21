@@ -27,7 +27,11 @@
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Modelo</label>
-                    <input type="text" id="vehicle_model" required class="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                    <input type="text" id="vehicle_model" list="models_list" required 
+                           placeholder="Escribe para buscar..."
+                           class="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                    <datalist id="models_list">
+                        </datalist>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Año</label>
@@ -67,6 +71,31 @@
     </div>
 
     <script>
+        // 1. Cargar Modelos al Iniciar
+        async function loadModels() {
+            const user = document.getElementById('api_user').value;
+            const pass = document.getElementById('api_pass').value;
+            if(!user || !pass) return;
+
+            try {
+                const credentials = btoa(user + ":" + pass);
+                const response = await fetch('/api/cases/models', {
+                    headers: { 'Authorization': 'Basic ' + credentials }
+                });
+                if(response.ok) {
+                    const models = await response.json();
+                    const list = document.getElementById('models_list');
+                    list.innerHTML = models.map(m => `<option value="${m}">`).join('');
+                    console.log("Modelos cargados: " + models.length);
+                }
+            } catch(e) { console.log("Esperando credenciales válidas..."); }
+        }
+        
+        // Intentar cargar al inicio y cuando cambien las credenciales
+        loadModels();
+        document.getElementById('api_pass').addEventListener('change', loadModels);
+
+        // 2. Manejo del Formulario
         document.getElementById('caseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const statusDiv = document.getElementById('statusMessage');
@@ -74,7 +103,6 @@
             statusDiv.className = "mt-4 text-center text-sm text-gray-600";
             statusDiv.classList.remove('hidden');
 
-            // 1. LEER CREDENCIALES DEL FORMULARIO
             const user = document.getElementById('api_user').value;
             const pass = document.getElementById('api_pass').value;
             const credentials = btoa(user + ":" + pass);
@@ -102,17 +130,16 @@
                     const result = await response.json();
                     statusDiv.textContent = "✅ Guardado! ID: " + result.id;
                     statusDiv.className = "mt-4 text-center text-sm text-green-600 font-bold";
-                    // Limpiar formulario pero dejar credenciales
                     document.getElementById('caseForm').reset();
+                    // Restaurar valores por defecto si es necesario
+                    document.getElementById('api_user').value = user; 
+                    document.getElementById('api_pass').value = pass;
                 } else {
-                    // Si falla, mostramos el error sin que el navegador secuestre el login
-                    const error = await response.json(); // Ojo: si es 401 el navegador podría saltar igual antes de llegar aquí
-                    statusDiv.textContent = "❌ Error: " + response.status + " (Verifica usuario/password)";
+                    statusDiv.textContent = "❌ Error: " + response.status;
                     statusDiv.className = "mt-4 text-center text-sm text-red-600 font-bold";
                 }
             } catch (err) {
-                console.error(err);
-                statusDiv.textContent = "❌ Error de conexión (Revisa consola)";
+                statusDiv.textContent = "❌ Error de conexión";
                 statusDiv.className = "mt-4 text-center text-sm text-red-600 font-bold";
             }
         });

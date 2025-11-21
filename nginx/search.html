@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscador VW AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen p-4">
+    <div class="max-w-3xl mx-auto">
+        
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">🔍 VW Knowledge Base</h1>
+            <a href="create_case.html" class="text-blue-600 hover:underline">Registrar Nuevo Caso &rarr;</a>
+        </div>
+
+        <div class="bg-yellow-50 p-3 mb-4 rounded border border-yellow-200 text-sm">
+            <h3 class="font-bold text-yellow-800 mb-2">🔐 Credenciales API (.env)</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <input type="text" id="api_user" placeholder="Usuario" class="border p-1 rounded w-full" value="admin">
+                <input type="password" id="api_pass" placeholder="Password (.env)" class="border p-1 rounded w-full">
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="query" placeholder="Describe el problema (ej. 'Ruido metálico al frenar')" 
+                       class="flex-1 border border-gray-300 rounded-lg p-3 text-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                <button onclick="performSearch()" class="bg-blue-900 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-800 transition">
+                    Buscar
+                </button>
+            </div>
+            
+            <div class="flex gap-4 text-sm">
+                
+                <div class="relative">
+                    <input type="text" id="model_filter" list="search_models_list" 
+                           placeholder="Filtrar por Modelo..." 
+                           class="border p-2 rounded w-48 focus:ring-2 focus:ring-blue-200 outline-none">
+                    <datalist id="search_models_list">
+                        </datalist>
+                </div>
+
+                <select id="group_filter" class="border p-2 rounded w-48 bg-white">
+                    <option value="">Todos los Grupos</option>
+                    <option value="Motor">Motor</option>
+                    <option value="Suspensión">Suspensión</option>
+                    <option value="Eléctrico">Eléctrico</option>
+                    <option value="Transmisión">Transmisión</option>
+                    <option value="Carrocería">Carrocería</option>
+                    <option value="Frenos">Frenos</option>
+                    <option value="Climatización">Climatización</option>
+                    <option value="Infoentretenimiento">Infoentretenimiento</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="resultsArea" class="space-y-4">
+            <p class="text-center text-gray-500 mt-10">Ingresa una consulta para buscar en la base de conocimiento.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Lógica de Modelos ---
+        async function loadModels() {
+            const user = document.getElementById('api_user').value;
+            const pass = document.getElementById('api_pass').value;
+            
+            // Solo intentamos si hay algo escrito en password
+            if(!pass) return;
+
+            try {
+                const credentials = btoa(user + ":" + pass);
+                const response = await fetch('/api/cases/models', {
+                    headers: { 'Authorization': 'Basic ' + credentials }
+                });
+                if(response.ok) {
+                    const models = await response.json();
+                    const list = document.getElementById('search_models_list');
+                    list.innerHTML = models.map(m => `<option value="${m}">`).join('');
+                    console.log("Lista de modelos actualizada.");
+                }
+            } catch(e) { console.log("Error cargando modelos (¿Credenciales?)"); }
+        }
+
+        // Intentar cargar cuando el usuario salga del campo password
+        document.getElementById('api_pass').addEventListener('blur', loadModels);
+        // También al cargar por si el navegador autocompleta
+        window.onload = loadModels;
+
+
+        // --- Lógica de Búsqueda ---
+        async function performSearch() {
+            const query = document.getElementById('query').value;
+            if (!query) return;
+
+            const resultsDiv = document.getElementById('resultsArea');
+            resultsDiv.innerHTML = '<p class="text-center text-gray-500">Pensando... 🧠</p>';
+
+            const user = document.getElementById('api_user').value;
+            const pass = document.getElementById('api_pass').value;
+            
+            if(!pass) {
+                alert("Por favor ingresa la contraseña primero.");
+                resultsDiv.innerHTML = '';
+                return;
+            }
+            
+            const credentials = btoa(user + ":" + pass);
+
+            const payload = {
+                query: query,
+                model_filter: document.getElementById('model_filter').value || null,
+                group_filter: document.getElementById('group_filter').value || null
+            };
+
+            try {
+                const response = await fetch('/api/cases/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Basic ' + credentials
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 401) {
+                    resultsDiv.innerHTML = '<p class="text-center text-red-600 font-bold">❌ Credenciales Incorrectas</p>';
+                    return;
+                }
+
+                if (!response.ok) throw new Error("Error server");
+
+                const results = await response.json();
+                renderResults(results);
+
+            } catch (error) {
+                console.error(error);
+                resultsDiv.innerHTML = '<p class="text-center text-red-500">Error de conexión.</p>';
+            }
+        }
+
+        function renderResults(cases) {
+            const container = document.getElementById('resultsArea');
+            if (cases.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-600">No se encontraron coincidencias.</p>';
+                return;
+            }
+
+            container.innerHTML = cases.map(c => `
+                <div class="bg-white p-5 rounded-lg shadow border-l-4 border-blue-900 hover:shadow-md transition">
+                    <div class="flex justify-between items-start">
+                        <h3 class="font-bold text-xl text-gray-800">${c.title}</h3>
+                        <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${c.vehicle_model} (${c.year})</span>
+                    </div>
+                    <div class="mt-2 text-gray-600">
+                        <p><span class="font-semibold">Problema:</span> ${c.problem_description}</p>
+                    </div>
+                    <div class="mt-3 bg-green-50 p-3 rounded text-gray-800 border border-green-100">
+                        <p><span class="font-semibold text-green-700">💡 Solución:</span> ${c.solution_description}</p>
+                    </div>
+                    <div class="mt-2 text-right">
+                        <span class="text-xs text-gray-400">Grupo: ${c.construction_group} • Relevancia: ${(c.score * 100).toFixed(0)}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
